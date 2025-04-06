@@ -1,4 +1,5 @@
 import { Tldraw, createShapeId, Editor, TLShapeId, Vec, toRichText } from "tldraw";
+import { getPointerInfo } from "tldraw";
 import "tldraw/tldraw.css";
 import { useCallback, useState, useEffect, useRef } from "react";
 import './index.css';
@@ -55,7 +56,6 @@ const createArrowBetweenShapes = (editor: Editor, startShapeId: TLShapeId, endSh
 };
 
 // Improved function to calculate optimal positions for text based on angle
-// Improved function to calculate optimal positions for text based on angle
 const calculateTextPosition = (angle: number) => {
   const nodeX = Math.cos(angle) * SPOKE_LENGTH;
   const nodeY = Math.sin(angle) * SPOKE_LENGTH;
@@ -70,31 +70,35 @@ const calculateTextPosition = (angle: number) => {
     textX += 35; // Adjust rightwards for better placement
   } else if (angle >= Math.PI && angle < 4 * Math.PI / 3) { // Second quadrant (Spoke No.4)
     textX -= 20; // Adjust leftwards for better placement
-  }
+  } 
 
   return { nodeX, nodeY, textX, textY };
 };
 
-
 const TldrawComponent = () => {
   const [spokeCount, setSpokeCount] = useState(6);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [globalRotation, setGlobalRotation] = useState(0); // Track global rotation
   const diagramRef = useRef<{
     hubId: TLShapeId | null;
     nodeIds: TLShapeId[];
     textIds: TLShapeId[];
     arrowIds: TLShapeId[];
+    groupIds: TLShapeId[]; // Store group IDs
     baseAngles: number[]; // Store the initial angles of spokes
     centerX: number;
     centerY: number;
+    lastDragPosition: { x: number, y: number } | null;
   }>({
     hubId: null,
     nodeIds: [],
     textIds: [],
     arrowIds: [],
+    groupIds: [],
     baseAngles: [],
     centerX: 600,
-    centerY: 400
+    centerY: 400,
+    lastDragPosition: null
   });
 
   // Function to create the hub and spokes with text labels and arrows
@@ -106,11 +110,13 @@ const TldrawComponent = () => {
     const centerX = 600;
     const centerY = 400;
 
+    // Create hub with initial rotation
     editor.createShape({
       id: hubId,
       type: "geo",
       x: centerX - HUB_RADIUS,
       y: centerY - HUB_RADIUS,
+      rotation: globalRotation,
       props: {
         geo: "ellipse",
         w: HUB_RADIUS * 2,
@@ -126,23 +132,38 @@ const TldrawComponent = () => {
     const textIds: TLShapeId[] = [];
     const nodeIds: TLShapeId[] = [];
     const arrowIds: TLShapeId[] = [];
+    const groupIds: TLShapeId[] = [];
     const baseAngles: number[] = [];
 
     for (let i = 0; i < spokeCount; i++) {
-      const angle = (i * 2 * Math.PI) / spokeCount;
+      // Add global rotation to base angles
+      const angle = (i * 2 * Math.PI) / spokeCount + globalRotation;
       baseAngles.push(angle);
       const { nodeX, nodeY, textX, textY } = calculateTextPosition(angle);
       const textId = createShapeId();
       const nodeId = createShapeId();
+      const groupId = createShapeId();
 
       textIds.push(textId);
       nodeIds.push(nodeId);
+      groupIds.push(groupId);
 
+      // First create the group
+      editor.createShape({
+        id: groupId,
+        type: "group",
+        x: 0,
+        y: 0,
+        props: {}
+      });
+
+      // Create node (small ellipse)
       editor.createShape({
         id: nodeId,
         type: "geo",
         x: centerX + nodeX - NODE_RADIUS,
         y: centerY + nodeY - NODE_RADIUS,
+        parentId: groupId, // Set parent directly
         props: {
           geo: "ellipse",
           w: NODE_RADIUS * 2,
@@ -153,11 +174,13 @@ const TldrawComponent = () => {
         },
       });
 
+      // Create text
       editor.createShape({
         id: textId,
         type: "text",
         x: centerX + textX - 80, // Center the text better
         y: centerY + textY - 20, // Adjust vertical position
+        parentId: groupId, // Set parent directly
         props: {
           w: 150,
           richText: toRichText(`${textString} ${i + 1}`),
@@ -168,6 +191,7 @@ const TldrawComponent = () => {
         },
       });
 
+      // Create arrow from hub to node
       const arrowId = createArrowBetweenShapes(editor, hubId, nodeId);
       if (arrowId) arrowIds.push(arrowId);
     }
@@ -177,33 +201,45 @@ const TldrawComponent = () => {
       nodeIds,
       textIds,
       arrowIds,
+      groupIds,
       baseAngles,
       centerX,
-      centerY
+      centerY,
+      lastDragPosition: null
     };
     
     editor.zoomToFit();
     return diagramRef.current;
-  }, [spokeCount]);
+  }, [spokeCount, globalRotation]);
 
-  // Function to calculate angular difference between two positions
-  const calculateAngleDifference = (oldPos: { x: number, y: number }, newPos: { x: number, y: number }, center: { x: number, y: number }) => {
-    const oldAngle = Math.atan2(oldPos.y - center.y, oldPos.x - center.x);
-    const newAngle = Math.atan2(newPos.y - center.y, newPos.x - center.x);
-    return newAngle - oldAngle;
+  // Calculate angle from center
+  const calculateAngleFromCenter = (point: { x: number, y: number }, center: { x: number, y: number }) => {
+    return Math.atan2(point.y - center.y, point.x - center.x);
   };
 
-  // Function to rotate all elements
-  const rotateAllElements = (editor: Editor, angleDiff: number) => {
-    const { hubId, nodeIds, textIds, baseAngles, centerX, centerY } = diagramRef.current;
+  // Function to rotate all elements including the hub
+  const rotateAllElements = (editor: Editor, newRotation: number) => {
+    const { hubId, nodeIds, textIds, centerX, centerY } = diagramRef.current;
+    const rotationDiff = newRotation - globalRotation;
     
-    // Update base angles with rotation
-    const newBaseAngles = baseAngles.map(angle => angle + angleDiff);
-    diagramRef.current.baseAngles = newBaseAngles;
+    // Update global rotation
+    setGlobalRotation(rotationDiff);
     
-    // Update positions of all nodes and texts based on new angles
+    // Rotate hub
+    if (hubId) {
+      editor.updateShape({
+        id: hubId,
+        type: "geo",
+        rotation: globalRotation,
+      });
+    }
+    
+    // Calculate new positions for all nodes and texts
     for (let i = 0; i < nodeIds.length; i++) {
-      const newAngle = newBaseAngles[i];
+      // Calculate base angle and add global rotation
+      const baseAngle = (i * 2 * Math.PI) / spokeCount;
+      const newAngle = baseAngle + globalRotation;
+      
       const { nodeX, nodeY, textX, textY } = calculateTextPosition(newAngle);
       
       // Update node position
@@ -218,7 +254,7 @@ const TldrawComponent = () => {
       editor.updateShape({
         id: textIds[i],
         type: "text",
-        x: centerX + textX - 75,
+        x: centerX + textX - 80,
         y: centerY + textY - 20,
       });
     }
@@ -242,70 +278,86 @@ const TldrawComponent = () => {
     if (editor) {
       createHubAndSpokes(editor);
     }
-  }, [editor, spokeCount, createHubAndSpokes]);
+  }, [editor, spokeCount, createHubAndSpokes, globalRotation]);
 
   useEffect(() => {
     if (!editor) return;
 
-    // Track node positions for rotation detection
-    const nodePositions = new Map<TLShapeId, { x: number, y: number }>();
-    
-    // Initialize node positions
-    const { nodeIds } = diagramRef.current;
-    nodeIds.forEach(id => {
-      const bounds = editor.getShapePageBounds(id);
-      if (bounds) {
-        nodePositions.set(id, { 
-          x: bounds.x + bounds.width / 2, 
-          y: bounds.y + bounds.height / 2 
-        });
-      }
-    });
-
-    // Listen for shape updates
-    const unsubscribe = editor.store.listen("shape_update", ({ shapes }) => {
-      // Check if any of our nodes was moved
-      const { nodeIds, centerX, centerY } = diagramRef.current;
+    // Handle pointer down to start drag
+    const handlePointerDown = (e: any) => {
+      const { centerX, centerY } = diagramRef.current;
       const center = { x: centerX, y: centerY };
       
-      for (const shape of shapes) {
-        if (nodeIds.includes(shape.id)) {
-          const oldPos = nodePositions.get(shape.id);
-          const newBounds = editor.getShapePageBounds(shape.id);
+      // Determine if we clicked on any of our shape IDs
+      const hitShape = editor.getShapeAtPoint(e.point);
+      
+      if (hitShape) {
+        const { nodeIds, textIds } = diagramRef.current;
+        const isPartOfOurDiagram = 
+          (hitShape.id === diagramRef.current.hubId) || 
+          nodeIds.includes(hitShape.id) || 
+          textIds.includes(hitShape.id);
           
-          if (oldPos && newBounds) {
-            const newPos = { 
-              x: newBounds.x + newBounds.width / 2, 
-              y: newBounds.y + newBounds.height / 2 
-            };
-            
-            // Calculate rotation angle
-            const angleDiff = calculateAngleDifference(oldPos, newPos, center);
-            
-            // Rotate everything
-            rotateAllElements(editor, angleDiff);
-            
-            // Update all tracked positions after rotation
-            nodeIds.forEach(id => {
-              const bounds = editor.getShapePageBounds(id);
-              if (bounds) {
-                nodePositions.set(id, { 
-                  x: bounds.x + bounds.width / 2, 
-                  y: bounds.y + bounds.height / 2 
-                });
-              }
-            });
-            
-            break; // Only handle one node movement at a time
-          }
+        if (isPartOfOurDiagram) {
+          // Save initial drag position
+          diagramRef.current.lastDragPosition = {
+            x: e.point.x,
+            y: e.point.y
+          };
+          
+          // Prevent default dragging behavior
+          e.preventDefault();
         }
       }
-    });
-
-    return () => {
-      unsubscribe?.();
     };
-  }, [editor]);
+    
+    // Handle pointer move for rotation
+    const handlePointerMove = (e: any) => {
+      const { lastDragPosition, centerX, centerY } = diagramRef.current;
+      
+      if (lastDragPosition) {
+        const center = { x: centerX, y: centerY };
+        
+        // Calculate initial angle from center
+        const initialAngle = calculateAngleFromCenter(lastDragPosition, center);
+        
+        // Calculate new angle from center
+        const newAngle = calculateAngleFromCenter({ x: e.point.x, y: e.point.y }, center);
+        
+        // Calculate angle difference
+        const angleDiff = newAngle - initialAngle;
+        
+        // Update global rotation (ship's helm behavior)
+        const newRotation = globalRotation + angleDiff;
+        
+        // Rotate all elements
+        rotateAllElements(editor, newRotation);
+        
+        // Update last drag position
+        diagramRef.current.lastDragPosition = {
+          x: e.point.x,
+          y: e.point.y
+        };
+      }
+    };
+    
+    // Handle pointer up to end drag
+    const handlePointerUp = () => {
+      diagramRef.current.lastDragPosition = null;
+    };
+
+    // Add event listeners
+    editor.addListener("pointer_down", handlePointerDown);
+    editor.addListener("pointer_move", handlePointerMove);
+    editor.addListener("pointer_up", handlePointerUp);
+    
+    // Clean up
+    return () => {
+      editor.removeListener("pointer_down", handlePointerDown);
+      editor.removeListener("pointer_move", handlePointerMove);
+      editor.removeListener("pointer_up", handlePointerUp);
+    };
+  }, [editor, globalRotation]);
 
   const handleAddSpoke = useCallback(() => {
     if (spokeCount < MAX_SPOKES) setSpokeCount(spokeCount + 1);
@@ -317,8 +369,7 @@ const TldrawComponent = () => {
 
   const handleEditorMount = useCallback((editor: Editor) => {
     setEditor(editor);
-    createHubAndSpokes(editor);
-  }, [createHubAndSpokes]);
+  }, []);
 
   return (
     <div style={{ fontFamily: "serif" }}>
@@ -327,6 +378,7 @@ const TldrawComponent = () => {
           onClick={handleAddSpoke}
           disabled={spokeCount >= MAX_SPOKES}
           style={{
+            marginLeft: "1rem",
             marginRight: "1rem",
             padding: "0.5rem 1rem",
             background: spokeCount >= MAX_SPOKES ? "#ccc" : "#0c575f",
@@ -352,6 +404,9 @@ const TldrawComponent = () => {
         >
           ➖ Remove Spoke ({spokeCount}/{MIN_SPOKES})
         </button>
+        <div style={{ marginTop: "0.5rem", fontStyle: "italic" }}>
+          Click and drag any spoke or the hub to rotate the entire structure like a ship's helm.
+        </div>
       </div>
       <div
         style={{

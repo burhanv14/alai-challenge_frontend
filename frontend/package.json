@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tldraw/store": "^3.11.1",
     "bun": "^1.2.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
