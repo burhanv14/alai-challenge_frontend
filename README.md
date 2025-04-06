@@ -35,7 +35,7 @@ Ensure you have the following installed:
 1. **Clone the Repository**
    ```bash
    git clone https://github.com/your-username/alai-coding-challenge.git
-   cd alai-coding-challenge
+   cd alai-coding-challenge/frontend/
    ```
 
 2. **Install Dependencies**
@@ -47,7 +47,7 @@ Ensure you have the following installed:
 3. **Run the Development Server**
    Start the development server using **Bun.js**:
    ```bash
-   bun dev
+   bun run dev
    ```
 
 4. **Open the Project**
