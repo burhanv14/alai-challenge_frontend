@@ -7,7 +7,7 @@ export default function App() {
       <h1>Hub and Spoke Diagram</h1>
       <div className="tldraw-wrapper">
         <div className="tldraw-container">
-          <TldrawComponent inferDarkMode />
+          <TldrawComponent />
         </div>
       </div>
     </div>
