@@ -5,6 +5,9 @@
   box-sizing: border-box;
 }
 
+.tl-theme__light {
+	--color-background: rgba(0, 0, 0, 0); /* Light Theme Background */
+}
 /* Body Styling */
 body {
   font-family: 'Roboto', sans-serif;

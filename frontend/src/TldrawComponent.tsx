@@ -167,7 +167,7 @@ export default function TldrawComponent() {
   // Create hub and spokes with text labels and arrows
   const createHubAndSpokes = useCallback((editor: Editor) => {
     // Set color for next shapes
-    editor.setStyleForNextShapes(DefaultColorStyle, 'white');
+    editor.user.updateUserPreferences({ colorScheme: 'light' })
     
     // Clear existing shapes
     editor.deleteShapes(Array.from(editor.getCurrentPageShapeIds()));
