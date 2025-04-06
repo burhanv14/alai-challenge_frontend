@@ -1,6 +1,3 @@
-Here's the entire `README.md` file in markdown format:
-
-```markdown
 # Alai Coding Challenge - Hub and Spoke Diagram
 
 ## Project Overview
